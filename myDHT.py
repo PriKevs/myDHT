@@ -6,7 +6,7 @@ import hashlib
 from random import randint
 import threading
 import time
-import bencode
+from bencode import bencode, bdecode
 import collections
 
 BOOTSTRAP_NODES = (
@@ -38,7 +38,7 @@ def decode_nodes(nodes):
     return n
 
 
-class KNode:
+class KNode():
     def __init__(self, nid, ip, port):
         self.nid = nid
         self.ip = ip
@@ -56,7 +56,9 @@ class DHTClient(threading.Thread):
     def send_krpc(self, msg, address):
         try:
             self.ufd.sendto(bencode(msg), address)
+            print(bencode(msg))
         except Exception:
+            print("send error")
             pass
 
     def send_find_node(self, address, nid=None):
@@ -84,17 +86,16 @@ class DHTServer(DHTClient):
         self.master = master
         self.bind_ip = bind_ip
         self.bind_port = bind_port
-
-        self.ufd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.ufd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.ufd.bind((self.bind_ip, self.bind_port))
 
     def run(self):
+        self.join_DHT()
         while True:
             try:
-                self.join_DHT()
                 (data, address) = self.ufd.recvfrom(65536) 
                 msg = bdecode(data)
-                self.master.log(data, (address, port))
+                self.master.log(data, address)
             except Exception:
                 pass
 
