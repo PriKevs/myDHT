@@ -2,14 +2,18 @@
 
 import socket
 import struct
-import hashlib
-from random import randint
 import threading
 import time
+
+from random import randint
+import hashlib
 from bencode import bencode, bdecode
-import collections
+from nodes import decode_nodes, encode_nodes, Nodes, KNode
+
+from settings import *
 
 BOOTSTRAP_NODES = (
+    ("54.64.84.43", 8888),
     ("router.bittorrent.com", 6881),
     ("dht.transmissionbt.com", 6881),
     ("router.utorrent.com", 6881),
@@ -25,43 +29,21 @@ def random_id():
     return h.digest()
 
 
-def decode_nodes(nodes):
-    n = []
-    length = len(nodes)
-    if length % 26 != 0:
-        return n
-    for i in range(0, lengthn, 26):
-        nid = nodes[i:i+20] 
-        ip = socket.inet_ntoa(nodes[i+20:i+24])
-        port = struct.unpack("!H", nodes[i+24:i+26])[0]
-        n.append((nid, ip, port))
-    return n
-
-
-class KNode():
-    def __init__(self, nid, ip, port):
-        self.nid = nid
-        self.ip = ip
-        self.port = port
-
-
 class DHTClient(threading.Thread):
     def __init__(self, max_node_qsize):
         threading.Thread.__init__(self)
         self.setDaemon(True)
         self.max_node_qsize = max_node_qsize
         self.nid = random_id()
-        self.nodes = collections.deque(maxlen=max_node_qsize)
+        self.nodes = Nodes()
 
     def send_krpc(self, msg, address):
         try:
             self.ufd.sendto(bencode(msg), address)
-            print(bencode(msg))
-        except Exception:
-            print("send error")
-            pass
+        except Exception as msg:
+            print("DHTClient.send_krpc error: ", msg)
 
-    def send_find_node(self, address, nid=None):
+    def send_find_node(self, address, nid=None, target_id=random_id()):
         nid = self.nid
         tid = entropy(TID_LENGTH)
         msg = {
@@ -70,7 +52,7 @@ class DHTClient(threading.Thread):
             'q': 'find_node',
             'a': {
                 'id': nid,
-                'target': random_id()
+                'target': target_id
             }
         }
         self.send_krpc(msg, address)
@@ -79,6 +61,28 @@ class DHTClient(threading.Thread):
         for address in BOOTSTRAP_NODES:
             self.send_find_node(address)
 
+    def send_ping(self, address, nid):
+        tid = entropy(TID_LENGTH)
+        msg = {
+            't': tid,
+            'y': 'q',
+            'q': 'ping',
+            'a': {
+                'id': self.nid,
+            }
+        }
+        self.send_krpc(msg, address)
+
+
+    def process_find_node_response(self, msg, address): 
+        nodes = deocde_nodes(msg['r']['nodes'])
+        for node in nodes:
+            (nid, ip, port) = node
+            if len(nid) != 20: continue
+            if ip == self.bind_ip: continue
+            n = KNode(nid, ip, port)
+            self.nodes.store(n)
+
 
 class DHTServer(DHTClient):
     def __init__(self, master, bind_ip, bind_port, max_node_qsize):
@@ -86,6 +90,14 @@ class DHTServer(DHTClient):
         self.master = master
         self.bind_ip = bind_ip
         self.bind_port = bind_port
+        
+        self.process_request_actions = {
+            'ping': self.on_ping_request,
+            'find_node': self.on_find_node_request,
+            'get_peers': self.on_get_peers_request, 
+            'announce_peer': self.on_announce_peer_request,
+        }
+
         self.ufd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.ufd.bind((self.bind_ip, self.bind_port))
 
@@ -95,9 +107,52 @@ class DHTServer(DHTClient):
             try:
                 (data, address) = self.ufd.recvfrom(65536) 
                 msg = bdecode(data)
-                self.master.log(data, address)
-            except Exception:
-                pass
+                print(address)
+                self.on_message(msg, address) 
+            except Exception as msg:
+                if(DEBUG): print("DHTServer.run error: ", msg)
+
+    def refresh_id(self, nid, address):
+        (ip, port) = address
+        n = KNode(nid, ip, port)
+        self.nodes.store(n)
+
+    def on_message(self, msg, address):
+        try:
+            if msg['y'] == 'r':
+                self.refresh_id(msg['r']['id'], address)
+                if 'nodes' in msg['r']:
+                    self.process_find_node_response(msg, address)
+            elif msg['y'] == 'q':
+                try:
+                    self.process_request_actions[msg['q']](msg, address)
+                except KeyError as msg:
+                    if (DEBUG): print("on_message'r' error: ", msg)
+                    self.play_dead(msg, address)
+        except KeyError:
+            if (DEBUG): print("on_message error: ", msg)
+
+    def on_ping_request(self, msg, address):
+        nid = msg.nid
+        tid = msg['t']
+        msg = {
+            't': tid,
+            'y': 'r',
+            'r': {
+                'id': nid,
+             }    
+        }
+        self.send_krpc(msg, address)
+
+    def on_find_node_request(self, msg, address):
+        pass
+
+    def on_get_peers_request(self, msg, address):
+        pass
+
+    def on_announce_peer_request(self, msg, address):
+        pass
+
 
 class Master:
     def log(self, data, address=None):
@@ -107,7 +162,7 @@ class Master:
 
 
 if __name__ == '__main__':
-    dht = DHTServer(Master(), "0.0.0.0", 6882, 200)
+    dht = DHTServer(Master(), "0.0.0.0", 6882, max_node_qsize=200)
     dht.start()
     while True:
         time.sleep(1)
