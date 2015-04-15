@@ -19,6 +19,7 @@ BOOTSTRAP_NODES = (
     ("router.utorrent.com", 6881),
 )
 TID_LENGTH = 2
+TOKEN_LENGTH = 2
 
 def timer(t, f):
     Timer(t, f).start()
@@ -126,7 +127,7 @@ class DHTServer(DHTClient):
                 msg = bdecode(data)
                 #print(address)
                 self.on_message(msg, address) 
-            except IOError as msg:
+            except Exception as msg:
                 if(DEBUG): print("DHTServer.run error: ", msg)
 
     def refresh_id(self, nid, address):
@@ -181,16 +182,32 @@ class DHTServer(DHTClient):
             if DEBUG: print("on_find_node_request: ", msg)
 
     def on_get_peers_request(self, msg, address):
-        pass
+        try:
+            infohash = msg["a"]["info_hash"]
+            tid = msg["t"]
+            nid = msg['a']['id']
+            token = infohash[TOKEN_LENGTH]
+            msg = {
+                't': tid,
+                'y': 'r',
+                'r': {
+                    'id': infohash, 
+                    'nodes': '',
+                    'token': token,
+                } 
+            }
+            self.send_krpc(msg, address)
+        except KeyError as msg:
+            if DEBUG: print("on_get_peers_request: ", msg) 
 
     def on_announce_peer_request(self, msg, address):
-        pass
+        self.master.log(infohash, address)
 
 
 class Master:
     def log(self, data, address=None):
         print("%s from %s:%s" % (
-            str(data), address[0], address[1]
+            data.encode('hex'), address[0], address[1]
         ))
 
 
