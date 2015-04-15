@@ -32,6 +32,9 @@ def random_id():
     h.update(entropy(20))
     return h.digest()
 
+def get_neighbor(target, nid, end=10):
+    return target[:end]+nid[end:]
+
 
 class DHTClient(threading.Thread):
     def __init__(self, max_node_qsize):
@@ -191,7 +194,7 @@ class DHTServer(DHTClient):
                 't': tid,
                 'y': 'r',
                 'r': {
-                    'id': infohash, 
+                    'id': get_neighbor(infohash, self.nid), 
                     'nodes': '',
                     'token': token,
                 } 
