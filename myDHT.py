@@ -20,6 +20,9 @@ BOOTSTRAP_NODES = (
 )
 TID_LENGTH = 2
 
+def timer(t, f):
+    Timer(t, f).start()
+
 def entropy(length):
     return "".join(chr(randint(0, 255)) for _ in range(length))
 
@@ -58,6 +61,17 @@ class DHTClient(threading.Thread):
         }
         self.send_krpc(msg, address)
 
+    def auto_send_find_node(self):
+        while True:
+            try:
+                for bucket in self.nodes.buckets:
+                    for node in bucket:
+                        self.send_find_node((node.ip, node.port))
+                        time.sleep(0.05)
+            except Exception as msg:
+                if DEBUG: print("re_join_find_node: ", msg)
+            time.sleep(0.1)
+
     def join_DHT(self):
         for address in BOOTSTRAP_NODES:
             self.send_find_node(address)
@@ -71,7 +85,7 @@ class DHTClient(threading.Thread):
             'a': {
                 'id': self.nid,
             }
-        }
+        } 
         self.send_krpc(msg, address)
 
 
@@ -126,7 +140,8 @@ class DHTServer(DHTClient):
                 if 'nodes' in msg['r']:
                     self.process_find_node_response(msg, address)
             elif msg['y'] == 'q':
-                self.refresh_id(msg['r']['id'], address)
+                print(msg)
+                self.refresh_id(msg['a']['id'], address)
                 try:
                     self.process_request_actions[msg['q']](msg, address)
                 except KeyError as msg:
@@ -181,5 +196,4 @@ class Master:
 if __name__ == '__main__':
     dht = DHTServer(Master(), "0.0.0.0", 6882, max_node_qsize=200)
     dht.start()
-    while True:
-        time.sleep(1)
+    dht.auto_send_find_node()
