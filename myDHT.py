@@ -35,7 +35,7 @@ class DHTClient(threading.Thread):
         self.setDaemon(True)
         self.max_node_qsize = max_node_qsize
         self.nid = random_id()
-        self.nodes = Nodes()
+        self.nodes = Nodes(self.nid)
 
     def send_krpc(self, msg, address):
         try:
@@ -43,9 +43,10 @@ class DHTClient(threading.Thread):
         except Exception as msg:
             print("DHTClient.send_krpc error: ", msg)
 
-    def send_find_node(self, address, nid=None, target_id=random_id()):
+    def send_find_node(self, address, target_id=random_id()):
         nid = self.nid
         tid = entropy(TID_LENGTH)
+        target = nid
         msg = {
             't': tid,
             'y': 'q',
@@ -75,7 +76,7 @@ class DHTClient(threading.Thread):
 
 
     def process_find_node_response(self, msg, address): 
-        nodes = deocde_nodes(msg['r']['nodes'])
+        nodes = decode_nodes(msg['r']['nodes'])
         for node in nodes:
             (nid, ip, port) = node
             if len(nid) != 20: continue
@@ -105,9 +106,10 @@ class DHTServer(DHTClient):
         self.join_DHT()
         while True:
             try:
+                self.join_DHT()
                 (data, address) = self.ufd.recvfrom(65536) 
                 msg = bdecode(data)
-                print(address)
+                #print(address)
                 self.on_message(msg, address) 
             except Exception as msg:
                 if(DEBUG): print("DHTServer.run error: ", msg)
@@ -124,6 +126,7 @@ class DHTServer(DHTClient):
                 if 'nodes' in msg['r']:
                     self.process_find_node_response(msg, address)
             elif msg['y'] == 'q':
+                self.refresh_id(msg['r']['id'], address)
                 try:
                     self.process_request_actions[msg['q']](msg, address)
                 except KeyError as msg:
@@ -133,19 +136,33 @@ class DHTServer(DHTClient):
             if (DEBUG): print("on_message error: ", msg)
 
     def on_ping_request(self, msg, address):
-        nid = msg.nid
         tid = msg['t']
         msg = {
             't': tid,
             'y': 'r',
             'r': {
-                'id': nid,
+                'id': self.nid,
              }    
         }
         self.send_krpc(msg, address)
 
     def on_find_node_request(self, msg, address):
-        pass
+        try:
+            target = msg['a']['target']
+            tid = msg['t']
+            res = self.nodes.find_closest(target)
+            nodes = encode_nodes(res)
+            msg = {
+                't': tid,
+                'y': 'r',
+                'r': {
+                    'id': self.nid,
+                    'nodes': nodes,
+                }
+            }
+            self.send_krpc(msg, address)
+        except KeyError as msg:
+            if DEBUG: print("on_find_node_request: ", msg)
 
     def on_get_peers_request(self, msg, address):
         pass
