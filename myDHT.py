@@ -49,7 +49,7 @@ class DHTClient(threading.Thread):
     def send_find_node(self, address, target_id=random_id()):
         nid = self.nid
         tid = entropy(TID_LENGTH)
-        target = nid
+        target_id = nid
         msg = {
             't': tid,
             'y': 'q',
@@ -64,10 +64,11 @@ class DHTClient(threading.Thread):
     def auto_send_find_node(self):
         while True:
             try:
-                for bucket in self.nodes.buckets:
-                    for node in bucket:
-                        self.send_find_node((node.ip, node.port))
-                        time.sleep(0.05)
+                if self.nodes.mutex.acquire(1):
+                    for bucket in self.nodes.buckets:
+                        for node in bucket:
+                            self.send_find_node((node.ip, node.port))
+                    self.nodes.mutex.release()
             except Exception as msg:
                 if DEBUG: print("re_join_find_node: ", msg)
             time.sleep(0.1)
@@ -125,7 +126,7 @@ class DHTServer(DHTClient):
                 msg = bdecode(data)
                 #print(address)
                 self.on_message(msg, address) 
-            except Exception as msg:
+            except IOError as msg:
                 if(DEBUG): print("DHTServer.run error: ", msg)
 
     def refresh_id(self, nid, address):

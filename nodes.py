@@ -3,6 +3,7 @@ from struct import unpack, pack
 from socket import inet_ntoa, inet_aton
 import math
 import binascii
+import threading
 
 from settings import *
 
@@ -10,11 +11,13 @@ IDLEN = 20
 
 def encode_nodes(nodelist):
     n = b'' 
+    print(nodelist)
     for node in nodelist:
-        byte_nid = node[0]
-        byte_ip = inet_aton(node[1])
-        byte_port = pack('!H', node[2])
+        byte_nid = node.nid
+        byte_ip = inet_aton(node.ip)
+        byte_port = pack('!H', node.port)
         n = n + (byte_nid + byte_ip + byte_port)
+        if DEBUG: print(n)
     return n
 
 def decode_nodes(nodes):
@@ -52,6 +55,7 @@ class KNode:
         self.port = port
 
 class Nodes:
+    mutex = threading.Lock()
     def __init__(self, nid, k_size=8):
         self.k_size = k_size
         self.numbers_of_buckets = 160
@@ -59,22 +63,29 @@ class Nodes:
         self.buckets = [deque(maxlen=self.k_size) for _ in range(self.numbers_of_buckets)]
 
     def store(self, n):
+        if self.nid == n.nid:
+            return
         distance = get_distance(self.nid, n.nid)
         bid = get_log2(distance)
-        if n in self.buckets[bid]:
-            self.buckets[bid].remove(n)
-        self.buckets[bid].appendleft(n)
+        if self.mutex.acquire(1):
+            if n in self.buckets[bid]:
+                self.buckets[bid].remove(n)
+            self.buckets[bid].appendleft(n)
+            self.mutex.release()
         #if(DEBUG): print("bid: ", bid, "ip:", n.ip, n.port)
 
     def find_closest(self, target):
-        distance = get_destance(self.nid, target)
+        if self.nid == target:
+            return []
+        distance = get_distance(self.nid, target)
         bid = get_log2(distance)
         res = []
         while len(self.buckets[bid]) == 0:
             bid = bid - 1
-        for node in self.buckets[bid]:
-            res.append(node)
-        if DEBUG: print(res)
+        if self.mutex.acquire(1):
+            for node in self.buckets[bid]:
+                res.append(node)
+            self.mutex.release()
         if len(res) > 3:
             return res[0:3]
         return res
